@@ -4,7 +4,7 @@ function formatBRL(n) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(n || 0)
 }
 
-export default function ReceiptMonthView({ month, groups, totals, onDelete }) {
+export default function ReceiptMonthView({ month, groups, totals, onDelete, onEdit }) {
   const days = Object.keys(groups.byDay).sort()
   const unknown = groups.unknown || []
   const monthTotal = totals.monthTotal || 0
@@ -40,7 +40,8 @@ export default function ReceiptMonthView({ month, groups, totals, onDelete }) {
                       <div className="receipt-meta">POS {rec.pos || '-'} • DOC {rec.doc || '-'} • NSU {rec.nsu || '-'}</div>
                       {rec.notes ? <div className="receipt-meta">{rec.notes}</div> : null}
                     </div>
-                    <div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="secondary" onClick={() => onEdit?.(rec)}>Editar</button>
                       <button className="secondary" onClick={() => onDelete?.(rec.id)}>Excluir</button>
                     </div>
                   </li>
@@ -64,7 +65,8 @@ export default function ReceiptMonthView({ month, groups, totals, onDelete }) {
                     <div className="receipt-meta">POS {rec.pos || '-'} • DOC {rec.doc || '-'} • NSU {rec.nsu || '-'}</div>
                     {rec.notes ? <div className="receipt-meta">{rec.notes}</div> : null}
                   </div>
-                  <div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button className="secondary" onClick={() => onEdit?.(rec)}>Editar</button>
                     <button className="secondary" onClick={() => onDelete?.(rec.id)}>Excluir</button>
                   </div>
                 </li>
@@ -76,4 +78,3 @@ export default function ReceiptMonthView({ month, groups, totals, onDelete }) {
     </div>
   )
 }
-

@@ -17,6 +17,8 @@ export default function App() {
   const [syncIdDraft, setSyncIdDraft] = useState('')
   const [syncStatus, setSyncStatus] = useState('off') // off | loading | ok | error
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [editorMode, setEditorMode] = useState('create') // 'create' | 'edit'
+  const [editingReceipt, setEditingReceipt] = useState(null)
   const [toast, setToast] = useState('')
   const lastSyncStatusRef = useRef('off')
 
@@ -81,6 +83,16 @@ export default function App() {
     showToast('Recibo adicionado')
   }
 
+  function handleUpdate(rec) {
+    const next = receipts.map(r => (r.id === rec.id ? { ...r, ...rec } : r))
+    setReceipts(next)
+    persist(next)
+    setDialogOpen(false)
+    setEditingReceipt(null)
+    setEditorMode('create')
+    showToast('Recibo atualizado')
+  }
+
   function handleDelete(id) {
     const next = receipts.filter(r => r.id !== id)
     setReceipts(next)
@@ -122,7 +134,7 @@ export default function App() {
         monthLabel={getMonthDisplayName(activeMonth)}
         onPrevMonth={() => setActiveMonth(prev => incMonth(prev, -1))}
         onNextMonth={() => setActiveMonth(prev => incMonth(prev, 1))}
-        onAdd={() => setDialogOpen(true)}
+        onAdd={() => { setEditorMode('create'); setEditingReceipt(null); setDialogOpen(true) }}
         onExportCSV={exportCSV}
         onExportJSON={exportJSON}
         syncId={syncId}
@@ -141,9 +153,9 @@ export default function App() {
         </div>
       </section>
 
-      <ReceiptMonthView month={activeMonth} groups={groups} totals={totals} onDelete={handleDelete} />
+      <ReceiptMonthView month={activeMonth} groups={groups} totals={totals} onDelete={handleDelete} onEdit={(rec) => { setEditorMode('edit'); setEditingReceipt(rec); setDialogOpen(true) }} />
 
-      <AddReceiptDialog open={dialogOpen} month={activeMonth} onClose={() => setDialogOpen(false)} onSave={handleAdd} />
+      <AddReceiptDialog open={dialogOpen} month={activeMonth} mode={editorMode} receipt={editingReceipt} onClose={() => { setDialogOpen(false); setEditingReceipt(null); setEditorMode('create') }} onSave={handleAdd} onUpdate={handleUpdate} />
 
       {toast ? <div className="toast" role="status" aria-live="polite">{toast}</div> : null}
     </div>

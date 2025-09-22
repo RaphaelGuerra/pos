@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Tesseract from 'tesseract.js'
+import { parseCieloReceipt } from '../lib/cieloParser'
 
 function parseCurrencyBRL(input) {
   if (input == null || input === '') return null
@@ -53,28 +54,64 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
   }, [file])
 
   // OCR helpers
-  function extractNumbersBR(text) {
-    const results = []
-    const re = /(R\$\s*)?(\d{1,3}(?:\.\d{3})*|\d+),(\d{2})/g
-    let m
-    while ((m = re.exec(text)) !== null) {
-      const raw = m[0]
-      const val = parseCurrencyBRL(raw)
-      if (val != null) results.push({ raw, val })
+  async function loadImageBitmap(blob) {
+    if (typeof createImageBitmap === 'function') {
+      return createImageBitmap(blob)
     }
-    return results
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => {
+        resolve(img)
+        URL.revokeObjectURL(img.src)
+      }
+      img.onerror = (err) => {
+        reject(err)
+        URL.revokeObjectURL(img.src)
+      }
+      img.src = URL.createObjectURL(blob)
+    })
   }
-  function extractDateBR(text) {
-    const re = /(\b)(\d{2})\/(\d{2})\/(\d{2,4})(\b)/g
-    let m
-    const found = []
-    while ((m = re.exec(text)) !== null) {
-      let [_, __, dd, mm, yy] = m
-      if (yy.length === 2) yy = String(2000 + Number(yy))
-      const iso = `${yy}-${mm}-${dd}`
-      found.push({ dd, mm, yy, iso })
+
+  async function preprocessImage(blob) {
+    const bitmap = await loadImageBitmap(blob)
+    const canvas = document.createElement('canvas')
+    canvas.width = bitmap.width
+    canvas.height = bitmap.height
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    ctx.drawImage(bitmap, 0, 0)
+    if ('close' in bitmap && typeof bitmap.close === 'function') bitmap.close()
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const { data } = imageData
+    const totalPixels = canvas.width * canvas.height
+    if (!totalPixels) return canvas
+
+    const grays = new Float32Array(totalPixels)
+    let min = 255
+    let max = 0
+    let sum = 0
+    for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+      const gray = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]
+      grays[p] = gray
+      if (gray < min) min = gray
+      if (gray > max) max = gray
+      sum += gray
     }
-    return found
+    const diff = max - min || 1
+    const mean = sum / totalPixels
+    const thresholdNorm = Math.min(0.85, Math.max(0.35, (mean - min) / diff))
+
+    for (let p = 0; p < totalPixels; p += 1) {
+      const normalized = (grays[p] - min) / diff
+      const value = normalized > thresholdNorm ? 255 : 0
+      const idx = p * 4
+      data[idx] = value
+      data[idx + 1] = value
+      data[idx + 2] = value
+      data[idx + 3] = 255
+    }
+    ctx.putImageData(imageData, 0, 0)
+    return canvas
   }
 
   async function runOCR(imgBlob) {
@@ -85,51 +122,42 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
     try {
       const controller = new AbortController()
       ocrCancelRef.current = () => controller.abort()
-      const { data } = await Tesseract.recognize(imgBlob, 'por', { logger: () => {} })
-      const text = (data?.text || '').replace(/\u00A0/g, ' ')
-      // value candidates
-      const nums = extractNumbersBR(text)
-      // heuristic: prefer numbers near keywords
-      const lines = text.split(/\r?\n/).map(s => s.toLowerCase())
-      const keyIdx = lines.findIndex(l => /(total|valor|pago|pagamento)/.test(l))
-      let pickedValue = null
-      if (keyIdx >= 0) {
-        const around = lines.slice(Math.max(0, keyIdx - 1), keyIdx + 2).join(' ')
-        const near = extractNumbersBR(around).map(n => n.val)
-        if (near.length) pickedValue = Math.max(...near)
+      let ocrInput = imgBlob
+      let usedPreprocessing = false
+      try {
+        const preprocessed = await preprocessImage(imgBlob)
+        if (preprocessed) {
+          ocrInput = preprocessed
+          usedPreprocessing = true
+        }
+      } catch (err) {
+        usedPreprocessing = false
       }
-      if (pickedValue == null && nums.length) pickedValue = Math.max(...nums.map(n => n.val))
+      const { data } = await Tesseract.recognize(ocrInput, 'por', { logger: () => {} })
+      const rawText = (data?.text || '').replace(/\u00A0/g, ' ')
+      const { normalizedText, result: parsed } = parseCieloReceipt(rawText)
 
-      // date candidates
-      const dates = extractDateBR(text)
-      let pickedDate = null
-      if (dates.length) {
-        // prefer dates within +/- 2 months from selected month
-        const monthRef = month
-        const candidates = dates.map(d => d.iso)
-        pickedDate = candidates[0]
-        const near = candidates.find(d => (d || '').slice(0, 7) === (monthRef || ''))
-        if (near) pickedDate = near
+      const hints = []
+      if (!valueUnreadable && !value && parsed.raw_amount) {
+        setValue(parsed.raw_amount)
+        if (parsed.amount_brl != null) hints.push(`Valor detectado R$ ${parsed.amount_brl.toFixed(2)}`)
       }
+      if (!dateUnreadable && !date && parsed.datetime_local) {
+        const isoDate = parsed.datetime_local.slice(0, 10)
+        setDate(isoDate)
+        hints.push(`Data detectada ${isoDate}`)
+      }
+      if (!pos && parsed.pos_id) setPos(`POS-${parsed.pos_id}`)
+      if (!doc && parsed.doc) setDoc(parsed.doc)
+      if (!nsu && parsed.auth) setNsu(parsed.auth)
 
-      // Fill only if user hasn't typed/locked field
-      let hints = []
-      if (!valueUnreadable && !value && pickedValue != null) {
-        setValue(String(pickedValue).replace('.', ','))
-        hints.push(`Valor detectado R$ ${pickedValue.toFixed(2)}`)
-      }
-      if (!dateUnreadable && !date && pickedDate) {
-        setDate(pickedDate)
-        hints.push(`Data detectada ${pickedDate}`)
-      }
       setOcrHint(hints.join(' • '))
       setOcrStatus('done')
       setOcrDebug({
-        text,
-        numbers: nums,
-        pickedValue,
-        dates,
-        pickedDate,
+        rawText,
+        normalizedText,
+        parsed,
+        usedPreprocessing,
       })
     } catch (e) {
       setOcrStatus('error')
@@ -215,18 +243,26 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
                 ) : (
                   <>
                     <div className="hint" style={{ fontWeight: 600 }}>Pré-visualização dos dados OCR</div>
-                    <div className="hint">Valor identificado: {ocrDebug.pickedValue != null ? `R$ ${ocrDebug.pickedValue.toFixed(2)}` : 'nenhum'}</div>
-                    <div className="hint">Data identificada: {ocrDebug.pickedDate || 'nenhuma'}</div>
+                    <div className="hint">Valor identificado: {(() => {
+                      const amount = ocrDebug.parsed?.amount_brl
+                      return amount != null ? `R$ ${amount.toFixed(2)}` : 'nenhum'
+                    })()}</div>
+                    <div className="hint">Data identificada: {(() => {
+                      const dt = ocrDebug.parsed?.datetime_local
+                      return dt ? dt.slice(0, 10) : 'nenhuma'
+                    })()}</div>
+                    <div className="hint">Pré-processamento: {ocrDebug.usedPreprocessing ? 'ativado' : 'não aplicado'}</div>
                     <details style={{ marginTop: 8 }}>
-                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Mostrar texto completo ({ocrDebug.text.length} caracteres)</summary>
-                      <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', background: 'var(--surface-2)', padding: 8, borderRadius: 6 }}>{ocrDebug.text}</pre>
+                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Texto normalizado ({ocrDebug.normalizedText.length} caracteres)</summary>
+                      <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', background: 'var(--surface-2)', padding: 8, borderRadius: 6 }}>{ocrDebug.normalizedText}</pre>
                     </details>
                     <details style={{ marginTop: 8 }}>
-                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Candidatos encontrados</summary>
-                      <div style={{ padding: '8px 4px', display: 'grid', gap: 4 }}>
-                        <div className="hint">Valores: {ocrDebug.numbers.length ? ocrDebug.numbers.map(n => `${n.raw} → ${n.val.toFixed(2)}`).join(', ') : 'nenhum'}</div>
-                        <div className="hint">Datas: {ocrDebug.dates.length ? ocrDebug.dates.map(d => `${d.dd}/${d.mm}/${d.yy}`).join(', ') : 'nenhuma'}</div>
-                      </div>
+                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>JSON extraído</summary>
+                      <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', background: 'var(--surface-2)', padding: 8, borderRadius: 6 }}>{JSON.stringify(ocrDebug.parsed ?? {}, null, 2)}</pre>
+                    </details>
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Texto bruto ({ocrDebug.rawText.length} caracteres)</summary>
+                      <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', background: 'var(--surface-2)', padding: 8, borderRadius: 6 }}>{ocrDebug.rawText}</pre>
                     </details>
                   </>
                 )}

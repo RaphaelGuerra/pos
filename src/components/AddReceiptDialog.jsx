@@ -1,13 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Tesseract from 'tesseract.js'
 import { parseCieloReceipt, postProcessCieloRois } from '../lib/cieloParser'
-
-function parseCurrencyBRL(input) {
-  if (input == null || input === '') return null
-  const s = String(input).replace(/[^0-9,.-]/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')
-  const n = Number(s)
-  return Number.isFinite(n) ? n : null
-}
+import { parsePtbrAmount as parseCurrencyBRL } from '../lib/money.js'
 
 const ROI_CONFIG = [
   {

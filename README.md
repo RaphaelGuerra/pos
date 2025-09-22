@@ -36,3 +36,23 @@ Next Steps (Optional)
 - Import JSON back into the month.
 - Add remote sync if needed (reuse storage functions/crypto from cash-ledger).
 - Reconciliation workflows against online statements.
+
+LLM Input Prep (Optional)
+-------------------------
+If you plan to reconcile against an online statement using an LLM, use the thin wrapper in `src/lib/llmPrep.js` so the model only compares and classifies:
+
+```js
+import { prepareDayInput } from './src/lib/llmPrep.js'
+
+const receipts = [
+  { id: 'r1', value: 400.00 },
+  { id: 'r2', value_raw: '120,00' }
+]
+const extract = { total_amount_brl: 520.00, transaction_count: 2 }
+const context = { date: '2012-03-11', currency: 'BRL' }
+
+const prepared = prepareDayInput(receipts, extract, context)
+// Send `prepared` to your model; it already has numeric amounts.
+```
+
+This avoids asking the LLM to parse text → numbers, reducing token usage and improving determinism.

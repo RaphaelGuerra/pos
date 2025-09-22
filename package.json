@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .js,.jsx --max-warnings 0",
-    "format": "prettier -w ."
+    "format": "prettier -w .",
+    "test:llm": "node scripts/test-llm-prep.mjs"
   },
   "dependencies": {
     "react": "^19.1.1",

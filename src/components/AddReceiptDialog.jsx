@@ -22,6 +22,7 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
   const [notes, setNotes] = useState('')
   const [ocrStatus, setOcrStatus] = useState('idle') // idle | running | done | error
   const [ocrHint, setOcrHint] = useState('')
+  const [ocrDebug, setOcrDebug] = useState(null)
   const ocrCancelRef = useRef(null)
 
   useEffect(() => {
@@ -40,7 +41,7 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
       // Default date to first day of selected month for convenience
       if (!date && month) setDate(`${month}-01`)
     }
-  }, [open, month, mode, receipt])
+  }, [open, month, mode, receipt, date])
 
   useEffect(() => {
     if (file) {
@@ -80,6 +81,7 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
     if (!imgBlob) return
     setOcrStatus('running')
     setOcrHint('Lendo texto…')
+    setOcrDebug(null)
     try {
       const controller = new AbortController()
       ocrCancelRef.current = () => controller.abort()
@@ -122,9 +124,17 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
       }
       setOcrHint(hints.join(' • '))
       setOcrStatus('done')
+      setOcrDebug({
+        text,
+        numbers: nums,
+        pickedValue,
+        dates,
+        pickedDate,
+      })
     } catch (e) {
       setOcrStatus('error')
       setOcrHint('Falha ao ler OCR')
+      setOcrDebug({ error: true, message: e?.message || String(e) })
     } finally {
       ocrCancelRef.current = null
     }
@@ -139,7 +149,7 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
 
   function reset() {
     setFile(null); setPreviewUrl(''); setValue(''); setValueUnreadable(false); setDate(''); setDateUnreadable(false); setPos(''); setDoc(''); setNsu(''); setNotes('')
-    setOcrStatus('idle'); setOcrHint('')
+    setOcrStatus('idle'); setOcrHint(''); setOcrDebug(null)
   }
 
   function buildReceipt(draft = false) {
@@ -198,6 +208,30 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
               {file ? <button className="secondary" type="button" onClick={() => runOCR(file)} disabled={ocrStatus==='running'}>{ocrStatus==='running' ? 'Lendo…' : 'Reprocessar OCR'}</button> : null}
             </div>
             <div className="hint">Você pode tirar foto ou escolher da galeria</div>
+            {ocrDebug ? (
+              <div className="ocr-debug">
+                {'error' in ocrDebug ? (
+                  <div className="hint" style={{ color: 'var(--danger)' }}>Falha na leitura OCR: {ocrDebug.message}</div>
+                ) : (
+                  <>
+                    <div className="hint" style={{ fontWeight: 600 }}>Pré-visualização dos dados OCR</div>
+                    <div className="hint">Valor identificado: {ocrDebug.pickedValue != null ? `R$ ${ocrDebug.pickedValue.toFixed(2)}` : 'nenhum'}</div>
+                    <div className="hint">Data identificada: {ocrDebug.pickedDate || 'nenhuma'}</div>
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Mostrar texto completo ({ocrDebug.text.length} caracteres)</summary>
+                      <pre style={{ whiteSpace: 'pre-wrap', maxHeight: 160, overflow: 'auto', background: 'var(--surface-2)', padding: 8, borderRadius: 6 }}>{ocrDebug.text}</pre>
+                    </details>
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ cursor: 'pointer', color: 'var(--muted)' }}>Candidatos encontrados</summary>
+                      <div style={{ padding: '8px 4px', display: 'grid', gap: 4 }}>
+                        <div className="hint">Valores: {ocrDebug.numbers.length ? ocrDebug.numbers.map(n => `${n.raw} → ${n.val.toFixed(2)}`).join(', ') : 'nenhum'}</div>
+                        <div className="hint">Datas: {ocrDebug.dates.length ? ocrDebug.dates.map(d => `${d.dd}/${d.mm}/${d.yy}`).join(', ') : 'nenhuma'}</div>
+                      </div>
+                    </details>
+                  </>
+                )}
+              </div>
+            ) : null}
           </div>
 
           <div className="form-grid">

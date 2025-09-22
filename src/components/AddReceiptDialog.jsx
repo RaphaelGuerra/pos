@@ -10,15 +10,78 @@ function parseCurrencyBRL(input) {
 }
 
 const ROI_CONFIG = [
-  { id: 'ROI_A', label: 'brand_mode', rect: { x: 0.34, y: 0.13, w: 0.32, h: 0.05 }, psm: 7, whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZÇÃÉÍÓÚÂÊÔÀ- ' },
-  { id: 'ROI_B', label: 'masked_pan', rect: { x: 0.3, y: 0.18, w: 0.4, h: 0.04 }, psm: 7, whitelist: '*0123456789 ' },
-  { id: 'ROI_C', label: 'via_pos', rect: { x: 0.18, y: 0.23, w: 0.64, h: 0.05 }, psm: 6, whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/ ' },
-  { id: 'ROI_D', label: 'cnpj_digits', rect: { x: 0.28, y: 0.32, w: 0.3, h: 0.04 }, psm: 7, whitelist: '0123456789' },
-  { id: 'ROI_E', label: 'merchant_name', rect: { x: 0.18, y: 0.38, w: 0.64, h: 0.06 }, psm: 6, whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/ ' },
-  { id: 'ROI_F', label: 'address_cityUF', rect: { x: 0.18, y: 0.45, w: 0.64, h: 0.1 }, psm: 6, whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/º° ' },
-  { id: 'ROI_G', label: 'doc_aut_line', rect: { x: 0.18, y: 0.55, w: 0.64, h: 0.05 }, psm: 7, whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789- ' },
-  { id: 'ROI_H', label: 'date_time_chan', rect: { x: 0.18, y: 0.63, w: 0.64, h: 0.06 }, psm: 7, whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/: ' },
-  { id: 'ROI_I', label: 'amount', rect: { x: 0.6, y: 0.78, w: 0.28, h: 0.06 }, psm: 7, whitelist: '0123456789.,' },
+  {
+    id: 'ROI_A',
+    label: 'brand_mode',
+    rect: { x: 0.34, y: 0.13, w: 0.32, h: 0.05 },
+    psm: 7,
+    whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZÇÃÉÍÓÚÂÊÔÀ- ',
+    expectDigits: false,
+  },
+  {
+    id: 'ROI_B',
+    label: 'masked_pan',
+    rect: { x: 0.3, y: 0.18, w: 0.4, h: 0.04 },
+    psm: 7,
+    whitelist: '*0123456789',
+    expectDigits: true,
+  },
+  {
+    id: 'ROI_C',
+    label: 'via_pos',
+    rect: { x: 0.18, y: 0.23, w: 0.64, h: 0.05 },
+    psm: 7,
+    whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789/',
+    expectDigits: true,
+  },
+  {
+    id: 'ROI_D',
+    label: 'cnpj_digits',
+    rect: { x: 0.28, y: 0.32, w: 0.3, h: 0.04 },
+    psm: 7,
+    whitelist: '0123456789',
+    expectDigits: true,
+  },
+  {
+    id: 'ROI_E',
+    label: 'merchant_name',
+    rect: { x: 0.18, y: 0.38, w: 0.64, h: 0.06 },
+    psm: 7,
+    whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/ ',
+    expectDigits: false,
+  },
+  {
+    id: 'ROI_F',
+    label: 'address_cityUF',
+    rect: { x: 0.18, y: 0.45, w: 0.64, h: 0.1 },
+    psm: 7,
+    whitelist: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-/º° ',
+    expectDigits: false,
+  },
+  {
+    id: 'ROI_G',
+    label: 'doc_aut_line',
+    rect: { x: 0.18, y: 0.55, w: 0.64, h: 0.05 },
+    psm: 7,
+    whitelist: 'DOCAUT-0123456789',
+    expectDigits: true,
+  },
+  {
+    id: 'ROI_H',
+    label: 'date_time_chan',
+    rect: { x: 0.18, y: 0.63, w: 0.64, h: 0.06 },
+    psm: 7,
+    whitelist: '0123456789/:ABCDEFGHIJKLMNOPQRSTUVWXYZ-',
+    expectDigits: true,
+  },
+  {
+    id: 'ROI_I',
+    label: 'amount',
+    rect: { x: 0.6, y: 0.78, w: 0.28, h: 0.06 },
+    psm: 7,
+    whitelist: '0123456789,.',
+    expectDigits: true,
+  },
 ]
 
 function createCanvas(width, height) {
@@ -173,6 +236,154 @@ function morphologyOpenHorizontal(binary, width, height) {
   return dilated
 }
 
+function gaussianBlur3x3(grays, width, height) {
+  const output = new Float32Array(grays.length)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let sum = 0
+      let weight = 0
+      for (let ky = -1; ky <= 1; ky += 1) {
+        const yy = Math.min(height - 1, Math.max(0, y + ky))
+        for (let kx = -1; kx <= 1; kx += 1) {
+          const xx = Math.min(width - 1, Math.max(0, x + kx))
+          const w = (ky === 0 && kx === 0)
+            ? 4
+            : ky === 0 || kx === 0
+              ? 2
+              : 1
+          sum += grays[yy * width + xx] * w
+          weight += w
+        }
+      }
+      output[y * width + x] = sum / (weight || 1)
+    }
+  }
+  return output
+}
+
+function binaryArrayToCanvas(binary, width, height) {
+  const canvas = createCanvas(width, height)
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  const imageData = ctx.createImageData(width, height)
+  const { data } = imageData
+  for (let i = 0; i < binary.length; i += 1) {
+    const value = binary[i]
+    const idx = i * 4
+    data[idx] = value
+    data[idx + 1] = value
+    data[idx + 2] = value
+    data[idx + 3] = 255
+  }
+  ctx.putImageData(imageData, 0, 0)
+  return canvas
+}
+
+function majorityVote(strings = [], expectDigits = false) {
+  const candidates = strings
+    .map((s) => (s == null ? '' : String(s)).trim())
+    .filter((s) => s.length)
+  if (!candidates.length) return ''
+  const maxLen = Math.max(...candidates.map((s) => s.length))
+  const chars = []
+  for (let i = 0; i < maxLen; i += 1) {
+    const counts = new Map()
+    candidates.forEach((s) => {
+      const ch = i < s.length ? s[i] : ''
+      counts.set(ch, (counts.get(ch) || 0) + 1)
+    })
+    let bestChar = ''
+    let bestCount = -1
+    counts.forEach((count, ch) => {
+      if (count > bestCount || (count === bestCount && ch && !bestChar)) {
+        bestChar = ch
+        bestCount = count
+      }
+    })
+    chars.push(bestChar)
+  }
+  let vote = chars.join('').trim()
+  if (!vote) vote = candidates[0]
+  if (expectDigits) {
+    const digitCount = vote.replace(/\D/g, '').length
+    let bestCandidate = vote
+    let bestDigits = digitCount
+    let bestLength = vote.length
+    candidates.forEach((candidate) => {
+      const digits = candidate.replace(/\D/g, '').length
+      if (digits > bestDigits || (digits === bestDigits && candidate.length > bestLength)) {
+        bestCandidate = candidate
+        bestDigits = digits
+        bestLength = candidate.length
+      }
+    })
+    vote = bestCandidate.trim()
+  }
+  return vote
+}
+
+function prepareRoiVariants(source, rect) {
+  const cropped = cropCanvas(source, rect)
+  const { width, height } = cropped
+  const ctx = cropped.getContext('2d', { willReadFrequently: true })
+  const imageData = ctx.getImageData(0, 0, width, height)
+  const { data } = imageData
+  const totalPixels = width * height
+  const grays = new Float32Array(totalPixels)
+  for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+    grays[p] = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]
+  }
+
+  const enhanced = clahe(grays, width, height, 2.0, 8)
+  const enhancedCanvas = createCanvas(width, height)
+  const enhancedCtx = enhancedCanvas.getContext('2d', { willReadFrequently: true })
+  const enhancedImage = enhancedCtx.createImageData(width, height)
+  for (let p = 0; p < totalPixels; p += 1) {
+    const value = Math.max(0, Math.min(255, Math.round(enhanced[p])))
+    const idx = p * 4
+    enhancedImage.data[idx] = value
+    enhancedImage.data[idx + 1] = value
+    enhancedImage.data[idx + 2] = value
+    enhancedImage.data[idx + 3] = 255
+  }
+  enhancedCtx.putImageData(enhancedImage, 0, 0)
+
+  const scale = 1.7
+  const scaledWidth = Math.max(1, Math.round(width * scale))
+  const scaledHeight = Math.max(1, Math.round(height * scale))
+  const scaled = createCanvas(scaledWidth, scaledHeight)
+  const scaledCtx = scaled.getContext('2d', { willReadFrequently: true })
+  scaledCtx.imageSmoothingEnabled = true
+  scaledCtx.drawImage(enhancedCanvas, 0, 0, scaled.width, scaled.height)
+
+  const scaledData = scaledCtx.getImageData(0, 0, scaled.width, scaled.height)
+  const scaledTotal = scaled.width * scaled.height
+  const scaledGrays = new Float32Array(scaledTotal)
+  for (let i = 0, p = 0; i < scaledData.data.length; i += 4, p += 1) {
+    scaledGrays[p] = scaledData.data[i]
+  }
+
+  const baseBinary = morphologyOpenHorizontal(
+    adaptiveThreshold(scaledGrays, scaled.width, scaled.height, 31, 15),
+    scaled.width,
+    scaled.height,
+  )
+  const lowCBinary = morphologyOpenHorizontal(
+    adaptiveThreshold(scaledGrays, scaled.width, scaled.height, 31, 12),
+    scaled.width,
+    scaled.height,
+  )
+  const blurredGrays = gaussianBlur3x3(scaledGrays, scaled.width, scaled.height)
+  const blurBinary = morphologyOpenHorizontal(
+    adaptiveThreshold(blurredGrays, scaled.width, scaled.height, 31, 15),
+    scaled.width,
+    scaled.height,
+  )
+
+  return [baseBinary, lowCBinary, blurBinary].map((binary) =>
+    binaryArrayToCanvas(binary, scaled.width, scaled.height),
+  )
+}
+
 export default function AddReceiptDialog({ open, month, mode = 'create', receipt = null, onClose, onSave, onUpdate }) {
   const [file, setFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
@@ -256,7 +467,7 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
     const imageData = scaledCtx.getImageData(0, 0, scaled.width, scaled.height)
     const { data } = imageData
     const totalPixels = scaled.width * scaled.height
-    if (!totalPixels) return scaled
+    if (!totalPixels) return { baseCanvas: scaled, binaryCanvas: scaled }
 
     const grays = new Float32Array(totalPixels)
     for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
@@ -271,16 +482,20 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
       scaled.height,
     )
 
+    const binaryCanvas = createCanvas(scaled.width, scaled.height)
+    const binaryCtx = binaryCanvas.getContext('2d', { willReadFrequently: true })
+    const binaryImage = binaryCtx.createImageData(scaled.width, scaled.height)
     for (let p = 0; p < totalPixels; p += 1) {
       const value = binary[p]
       const idx = p * 4
-      data[idx] = value
-      data[idx + 1] = value
-      data[idx + 2] = value
-      data[idx + 3] = 255
+      binaryImage.data[idx] = value
+      binaryImage.data[idx + 1] = value
+      binaryImage.data[idx + 2] = value
+      binaryImage.data[idx + 3] = 255
     }
-    scaledCtx.putImageData(imageData, 0, 0)
-    return scaled
+    binaryCtx.putImageData(binaryImage, 0, 0)
+
+    return { baseCanvas: scaled, binaryCanvas }
   }
 
   async function runOCR(imgBlob) {
@@ -300,7 +515,7 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
         usedPreprocessing = false
       }
 
-      const ocrTarget = processed || imgBlob
+      const ocrTarget = processed?.binaryCanvas || imgBlob
       const anchorOcr = await Tesseract.recognize(ocrTarget, 'por', {
         logger: () => {},
         tessedit_pageseg_mode: 6,
@@ -309,17 +524,24 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
       const fallback = parseCieloReceipt(rawText)
 
       let roiPayload = null
-      if (processed) {
+      if (processed?.baseCanvas) {
         const roiTexts = {}
         for (const spec of ROI_CONFIG) {
-          const roiCanvas = cropCanvas(processed, spec.rect)
-          const options = {
-            logger: () => {},
-            tessedit_pageseg_mode: spec.psm,
+          const variants = prepareRoiVariants(processed.baseCanvas, spec.rect)
+          const variantTexts = []
+          for (const variant of variants) {
+            const options = {
+              logger: () => {},
+              tessedit_pageseg_mode: spec.psm,
+            }
+            if (spec.whitelist) options.tessedit_char_whitelist = spec.whitelist
+            const roiResult = await Tesseract.recognize(variant, 'por', options)
+            variantTexts.push((roiResult?.data?.text || '').replace(/\u00A0/g, ' '))
           }
-          if (spec.whitelist) options.tessedit_char_whitelist = spec.whitelist
-          const roiResult = await Tesseract.recognize(roiCanvas, 'por', options)
-          roiTexts[spec.id] = (roiResult?.data?.text || '').replace(/\u00A0/g, ' ')
+          roiTexts[spec.id] = {
+            vote: majorityVote(variantTexts, spec.expectDigits),
+            variants: variantTexts,
+          }
         }
         roiPayload = postProcessCieloRois(roiTexts)
       }
@@ -401,6 +623,7 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
         normalizedText,
         parsed,
         roiTexts: roiPayload?.rois || null,
+        roiVariants: roiPayload?.variants || null,
         usedPreprocessing,
       })
     } catch (e) {

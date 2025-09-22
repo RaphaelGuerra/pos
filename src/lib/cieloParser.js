@@ -3,6 +3,152 @@ const UF_SET = new Set(UF_LIST);
 
 const BRAND_SET = new Set(['MASTERCARD', 'VISA', 'ELO', 'AMEX', 'HIPERCARD']);
 
+const UF_CORRECTIONS = {
+  HT: 'MT',
+  RM: 'RN',
+};
+
+const CONFUSABLE_TRANSLATIONS = {
+  O: '0',
+  o: '0',
+  Q: '0',
+  q: '0',
+  D: '0',
+  d: '0',
+  I: '1',
+  i: '1',
+  l: '1',
+  L: '1',
+  S: '5',
+  s: '5',
+  Z: '2',
+  z: '2',
+  B: '8',
+  b: '8',
+  G: '6',
+  g: '6',
+  T: '7',
+  t: '7',
+  H: '11',
+  h: '11',
+  C: '0',
+  c: '0',
+  A: '4',
+  a: '4',
+  E: '3',
+  e: '3',
+  U: '0',
+  u: '0',
+};
+
+const CHANNEL_LEXICON = ['ONL-C', 'OFF-C', 'CHI-C'];
+const VIA_LEXICON = ['VIA - CLIENTE', 'VIA CLIENTE', 'VIA-CLIENTE'];
+
+function replaceNumericConfusables(value) {
+  if (!value) return '';
+  return String(value)
+    .split('')
+    .map((ch) => (CONFUSABLE_TRANSLATIONS[ch] != null ? CONFUSABLE_TRANSLATIONS[ch] : ch))
+    .join('');
+}
+
+function fixDigits(value) {
+  return replaceNumericConfusables(value).replace(/\D/g, '');
+}
+
+function levenshtein(a, b) {
+  const s = String(a || '');
+  const t = String(b || '');
+  const dp = Array.from({ length: s.length + 1 }, () => new Array(t.length + 1).fill(0));
+  for (let i = 0; i <= s.length; i += 1) dp[i][0] = i;
+  for (let j = 0; j <= t.length; j += 1) dp[0][j] = j;
+  for (let i = 1; i <= s.length; i += 1) {
+    for (let j = 1; j <= t.length; j += 1) {
+      const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+    }
+  }
+  return dp[s.length][t.length];
+}
+
+function fuzzyPick(token, lexicon) {
+  const clean = toCleanUpper(token);
+  if (!clean) return clean;
+  let best = clean;
+  let bestDist = Infinity;
+  lexicon.forEach((entry) => {
+    const dist = levenshtein(clean, entry);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = entry;
+    }
+  });
+  return bestDist <= 2 ? best : clean;
+}
+
+function parseAmountFromVariants(strings = []) {
+  const candidates = [];
+  strings.forEach((value) => {
+    const matches = String(value || '').match(/\d{1,3}(?:\.\d{3})*,\d{2}/g);
+    if (matches && matches.length) {
+      candidates.push(matches[matches.length - 1]);
+    }
+  });
+  if (!candidates.length) return { raw: null, amount: null };
+  const unique = [...new Set(candidates)];
+  let bestRaw = unique[0];
+  let bestCount = 0;
+  let bestDistance = Infinity;
+  unique.forEach((candidate) => {
+    const count = candidates.filter((value) => value === candidate).length;
+    const distance = unique.reduce(
+      (acc, other) => acc + (other === candidate ? 0 : levenshtein(candidate, other)),
+      0,
+    );
+    if (count > bestCount || (count === bestCount && distance < bestDistance)) {
+      bestRaw = candidate;
+      bestCount = count;
+      bestDistance = distance;
+    }
+  });
+  return { raw: bestRaw, amount: parseAmount(bestRaw) };
+}
+
+function extractTokenDigits(token, sources = [], minDigits = 0) {
+  const regex = new RegExp(`${token}[\s:=\-]*([A-Z0-9]+)`, 'g');
+  const matches = [];
+  sources.forEach((source) => {
+    const normalized = toCleanUpper(source || '').replace(/[^A-Z0-9:=\-\s]/g, ' ');
+    let match = regex.exec(normalized);
+    while (match) {
+      matches.push(match[1]);
+      match = regex.exec(normalized);
+    }
+  });
+  for (let idx = matches.length - 1; idx >= 0; idx -= 1) {
+    const digits = fixDigits(matches[idx]);
+    if (!digits) continue;
+    if (!minDigits || digits.length >= minDigits) return digits;
+  }
+  return null;
+}
+
+function resolveCnpjCandidate(sources = []) {
+  const candidates = new Set();
+  sources.forEach((source) => {
+    const digits = fixDigits(source || '');
+    if (digits.length >= 14) {
+      for (let i = 0; i <= digits.length - 14; i += 1) {
+        candidates.add(digits.slice(i, i + 14));
+      }
+    }
+  });
+  for (const candidate of candidates) {
+    if (cnpjIsValid(candidate)) return candidate;
+  }
+  return null;
+}
+
 function stripDiacritics(value) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
@@ -126,7 +272,10 @@ function parseAddressAndLocation(rawValue, merchant, needs) {
   const tokens = locationLine.split(' ').filter(Boolean);
   let stateIndex = -1;
   for (let idx = tokens.length - 1; idx >= 0; idx -= 1) {
-    if (UF_SET.has(tokens[idx])) {
+    const token = tokens[idx];
+    const corrected = UF_CORRECTIONS[token] || token;
+    if (UF_SET.has(corrected)) {
+      tokens[idx] = corrected;
       stateIndex = idx;
       break;
     }
@@ -145,47 +294,65 @@ function parseAddressAndLocation(rawValue, merchant, needs) {
   if (!merchant.state) needs.add('merchant.state');
 }
 
-function extractDocAuth(value, needs) {
-  const normalized = toCleanUpper(value || '').replace(/[^A-Z0-9\s-]/g, ' ');
-  const docMatch = normalized.match(/(?:DOC|NSU)[\s-]?(\d{3,})/);
-  const authMatch = normalized.match(/AUT[\s-]?(\d{3,})/);
-  const doc = docMatch ? docMatch[1] : null;
-  const auth = authMatch ? authMatch[1] : null;
-  if (!doc) needs.add('doc');
-  if (!auth) needs.add('auth');
-  return { doc, auth };
+function extractDocAuth(value, variants, needs) {
+  const sources = [value, ...(variants || [])];
+  const docDigits =
+    extractTokenDigits('DOC', sources, 5) || extractTokenDigits('NSU', sources, 5) || null;
+  const authDigits = extractTokenDigits('AUT', sources, 5);
+  if (!docDigits) needs.add('doc');
+  if (!authDigits) needs.add('auth');
+  return { doc: docDigits, auth: authDigits };
 }
 
-function extractDateTimeChannel(value, needs) {
-  const cleaned = toCleanUpper(value || '').replace(/[^0-9A-Z/:\-\s]/g, ' ');
-  const dateMatch = cleaned.match(/([0-3]\d)\/(0\d|1[0-2])\/(\d{2,4})/);
-  const timeMatch = cleaned.match(/([0-2]\d):([0-5]\d)/);
-  const channelMatch = cleaned.match(/ONL-[A-Z]|CHIP|MAG/);
+function extractDateTimeChannel(value, variants, needs) {
+  const sources = [value, ...(variants || [])].map((src) =>
+    replaceNumericConfusables(toCleanUpper(src || '')).replace(/[^0-9A-Z/:\-\s]/g, ' '),
+  );
+  let dateMatch = null;
+  let timeMatch = null;
+  let channel = null;
+  sources.forEach((source) => {
+    if (!dateMatch) dateMatch = source.match(/([0-3]\d)\/(0\d|1[0-2])\/(\d{2,4})/);
+    if (!timeMatch) timeMatch = source.match(/([0-2]?\d):([0-5]\d)/);
+    if (!channel) {
+      const tokens = source.split(/\s+/).filter(Boolean);
+      for (const token of tokens) {
+        const pick = fuzzyPick(token, CHANNEL_LEXICON);
+        if (CHANNEL_LEXICON.includes(pick)) {
+          channel = pick;
+          break;
+        }
+        if (token === 'CHIP' || token === 'MAG') {
+          channel = token;
+          break;
+        }
+      }
+    }
+  });
+
   let datetimeLocal = null;
   if (dateMatch && timeMatch) {
     try {
       const isoDate = toIsoDate(dateMatch[1], dateMatch[2], dateMatch[3]);
-      datetimeLocal = `${isoDate}T${timeMatch[1]}:${timeMatch[2]}:00`;
+      const hour = String(timeMatch[1]).padStart(2, '0');
+      datetimeLocal = `${isoDate}T${hour}:${timeMatch[2]}:00`;
     } catch (err) {
-      // ignore, will flag below
+      // ignore
     }
   }
   if (!datetimeLocal) needs.add('datetime_local');
-  const channel = channelMatch ? channelMatch[0] : null;
   if (!channel) needs.add('channel');
   return { datetimeLocal, channel };
 }
 
-function extractAmount(value, needs) {
-  const text = String(value || '').replace(/[^0-9.,]/g, '');
-  const match = text.match(/\d{1,3}(?:\.\d{3})*,\d{2}/);
-  if (!match) {
+function extractAmount(value, variants, needs) {
+  const sources = [...(variants || []), value].filter((v) => v != null);
+  const { raw, amount } = parseAmountFromVariants(sources);
+  if (!raw) {
     needs.add('amount_brl');
     needs.add('raw_amount');
     return { amount: null, raw: null };
   }
-  const raw = match[0];
-  const amount = parseAmount(raw);
   if (amount == null) needs.add('amount_brl');
   return { amount, raw };
 }
@@ -193,8 +360,16 @@ function extractAmount(value, needs) {
 function postProcessCieloRois(roisInput = {}) {
   const needs = new Set();
   const rois = {};
+  const variants = {};
   Object.entries(roisInput).forEach(([key, value]) => {
-    rois[key] = cleanRoiValue(value);
+    if (value && typeof value === 'object' && ('vote' in value || 'variants' in value)) {
+      const voteValue = value.vote != null ? value.vote : value.text || '';
+      rois[key] = cleanRoiValue(voteValue);
+      variants[key] = (value.variants || []).map((entry) => cleanRoiValue(entry));
+    } else {
+      rois[key] = cleanRoiValue(value);
+      variants[key] = [];
+    }
   });
 
   const result = {
@@ -216,46 +391,71 @@ function postProcessCieloRois(roisInput = {}) {
     needs_user_input: [],
   };
 
-  const roiA = toCleanUpper(rois.ROI_A);
+  const roiASource = [rois.ROI_A, ...(variants.ROI_A || [])]
+    .map((entry) => toCleanUpper(entry))
+    .filter(Boolean)
+    .join(' ');
   let detectedBrand = null;
   BRAND_SET.forEach((brand) => {
-    if (!detectedBrand && roiA.includes(brand)) detectedBrand = brand;
+    if (!detectedBrand && roiASource.includes(brand)) detectedBrand = brand;
   });
   if (detectedBrand) result.brand = detectedBrand;
   else needs.add('brand');
 
-  if (/DEBITO/.test(roiA)) {
+  if (/DEBITO/.test(roiASource)) {
     result.mode = 'DEBITO';
-  } else if (/CREDITO\s*A\s*VISTA/.test(roiA)) {
+  } else if (/CREDITO\s*A\s*VISTA/.test(roiASource)) {
     result.mode = 'CREDITO_A_VISTA';
-  } else if (roiA) {
-    result.mode = formatEnum(roiA) || null;
+  } else if (roiASource) {
+    result.mode = formatEnum(roiASource) || null;
     if (!result.mode) needs.add('mode');
   } else {
     needs.add('mode');
   }
 
-  const roiB = (rois.ROI_B || '').replace(/\s+/g, '');
-  const maskMatch = roiB.match(/\*{6,16}\d{4}/);
-  if (maskMatch) {
-    result.masked_pan = maskMatch[0];
-    const tail = result.masked_pan.slice(-4);
-    result.card_last4 = tail;
+  const maskSources = [rois.ROI_B, ...(variants.ROI_B || [])].map((value) =>
+    replaceNumericConfusables(String(value || '')).replace(/[^\d*]/g, ''),
+  );
+  let mask = null;
+  maskSources.some((candidate) => {
+    const match = candidate.match(/\*{6,16}\d{4}/);
+    if (match) {
+      mask = match[0];
+      return true;
+    }
+    return false;
+  });
+  if (mask) {
+    result.masked_pan = mask;
+    result.card_last4 = mask.slice(-4);
   } else {
     needs.add('masked_pan');
     needs.add('card_last4');
   }
 
-  const roiC = toCleanUpper(rois.ROI_C);
-  if (/CLIENTE/.test(roiC)) result.via = 'CLIENTE';
+  const roiCSource = [rois.ROI_C, ...(variants.ROI_C || [])]
+    .map((value) => toCleanUpper(value))
+    .filter(Boolean);
+  let viaDetected = false;
+  roiCSource.forEach((entry) => {
+    const segments = entry.split(/[\\/]/).map((segment) => normalizeWhitespace(segment));
+    segments.forEach((segment) => {
+      if (!viaDetected && fuzzyPick(segment, VIA_LEXICON) === 'VIA - CLIENTE') {
+        viaDetected = true;
+      }
+    });
+  });
+  if (viaDetected) result.via = 'CLIENTE';
   else needs.add('via');
-  const posMatch = roiC.match(/POS[\s-]?(\d{6,12})/);
-  if (posMatch) result.pos_id = posMatch[1];
+
+  const posDigits = extractTokenDigits('POS', roiCSource, 8);
+  if (posDigits) result.pos_id = posDigits;
   else needs.add('pos_id');
 
-  const rawCnpj = (rois.ROI_D || '').replace(/\D/g, '');
-  if (rawCnpj.length === 14 && cnpjIsValid(rawCnpj)) {
-    result.merchant.cnpj = rawCnpj;
+  const cnpjSources = [rois.ROI_D, ...(variants.ROI_D || [])];
+  const resolvedCnpj = resolveCnpjCandidate(cnpjSources);
+  if (resolvedCnpj) {
+    result.merchant.cnpj = resolvedCnpj;
   } else {
     needs.add('merchant.cnpj');
   }
@@ -266,15 +466,15 @@ function postProcessCieloRois(roisInput = {}) {
 
   parseAddressAndLocation(rois.ROI_F, result.merchant, needs);
 
-  const { doc, auth } = extractDocAuth(rois.ROI_G, needs);
+  const { doc, auth } = extractDocAuth(rois.ROI_G, variants.ROI_G, needs);
   result.doc = doc;
   result.auth = auth;
 
-  const { datetimeLocal, channel } = extractDateTimeChannel(rois.ROI_H, needs);
+  const { datetimeLocal, channel } = extractDateTimeChannel(rois.ROI_H, variants.ROI_H, needs);
   result.datetime_local = datetimeLocal;
   result.channel = channel;
 
-  const { amount, raw } = extractAmount(rois.ROI_I, needs);
+  const { amount, raw } = extractAmount(rois.ROI_I, variants.ROI_I, needs);
   result.amount_brl = amount;
   result.raw_amount = raw;
 
@@ -282,7 +482,7 @@ function postProcessCieloRois(roisInput = {}) {
   if (!result.operation) needs.add('operation');
 
   result.needs_user_input = Array.from(needs);
-  return { rois, result };
+  return { rois, result, variants };
 }
 
 function extractMerchant(lines, needs) {
@@ -318,7 +518,10 @@ function extractMerchant(lines, needs) {
       const tokens = cityLine.split(' ');
       let stateIndex = -1;
       for (let idx = tokens.length - 1; idx >= 0; idx -= 1) {
-        if (UF_SET.has(tokens[idx])) {
+        const token = tokens[idx];
+        const corrected = UF_CORRECTIONS[token] || token;
+        if (UF_SET.has(corrected)) {
+          tokens[idx] = corrected;
           stateIndex = idx;
           break;
         }

@@ -1,6 +1,8 @@
 const UF_LIST = ['AC','AL','AM','AP','BA','CE','DF','ES','GO','MA','MG','MS','MT','PA','PB','PE','PI','PR','RJ','RN','RO','RR','RS','SC','SE','SP','TO'];
 const UF_SET = new Set(UF_LIST);
 
+const BRAND_SET = new Set(['MASTERCARD', 'VISA', 'ELO', 'AMEX', 'HIPERCARD']);
+
 function stripDiacritics(value) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
@@ -102,6 +104,185 @@ function sanitizeMerchantLine(line) {
   if (!line) return '';
   const cleaned = toCleanUpper(line).replace(/[^A-Z0-9/\-\s]/g, ' ').replace(/ +/g, ' ').trim();
   return fixAlphaNumericConfusions(cleaned);
+}
+
+function cleanRoiValue(value) {
+  if (!value) return '';
+  return normalizeWhitespace(String(value).replace(/\u00A0/g, ' '));
+}
+
+function parseAddressAndLocation(rawValue, merchant, needs) {
+  const lines = String(rawValue || '')
+    .split(/\n+/)
+    .map((line) => sanitizeMerchantLine(line))
+    .filter(Boolean);
+
+  if (!merchant.address && lines.length) {
+    merchant.address = lines[0];
+  }
+  if (!merchant.address) needs.add('merchant.address');
+
+  const locationLine = lines.length > 1 ? lines.slice(1).join(' ') : lines[0] || '';
+  const tokens = locationLine.split(' ').filter(Boolean);
+  let stateIndex = -1;
+  for (let idx = tokens.length - 1; idx >= 0; idx -= 1) {
+    if (UF_SET.has(tokens[idx])) {
+      stateIndex = idx;
+      break;
+    }
+  }
+  if (stateIndex >= 0) {
+    merchant.state = tokens[stateIndex];
+    merchant.city = tokens.slice(0, stateIndex).join(' ') || null;
+  } else if (tokens.length) {
+    merchant.city = tokens.join(' ');
+    needs.add('merchant.state');
+  } else {
+    needs.add('merchant.city');
+    needs.add('merchant.state');
+  }
+  if (!merchant.city) needs.add('merchant.city');
+  if (!merchant.state) needs.add('merchant.state');
+}
+
+function extractDocAuth(value, needs) {
+  const normalized = toCleanUpper(value || '').replace(/[^A-Z0-9\s-]/g, ' ');
+  const docMatch = normalized.match(/(?:DOC|NSU)[\s-]?(\d{3,})/);
+  const authMatch = normalized.match(/AUT[\s-]?(\d{3,})/);
+  const doc = docMatch ? docMatch[1] : null;
+  const auth = authMatch ? authMatch[1] : null;
+  if (!doc) needs.add('doc');
+  if (!auth) needs.add('auth');
+  return { doc, auth };
+}
+
+function extractDateTimeChannel(value, needs) {
+  const cleaned = toCleanUpper(value || '').replace(/[^0-9A-Z/:\-\s]/g, ' ');
+  const dateMatch = cleaned.match(/([0-3]\d)\/(0\d|1[0-2])\/(\d{2,4})/);
+  const timeMatch = cleaned.match(/([0-2]\d):([0-5]\d)/);
+  const channelMatch = cleaned.match(/ONL-[A-Z]|CHIP|MAG/);
+  let datetimeLocal = null;
+  if (dateMatch && timeMatch) {
+    try {
+      const isoDate = toIsoDate(dateMatch[1], dateMatch[2], dateMatch[3]);
+      datetimeLocal = `${isoDate}T${timeMatch[1]}:${timeMatch[2]}:00`;
+    } catch (err) {
+      // ignore, will flag below
+    }
+  }
+  if (!datetimeLocal) needs.add('datetime_local');
+  const channel = channelMatch ? channelMatch[0] : null;
+  if (!channel) needs.add('channel');
+  return { datetimeLocal, channel };
+}
+
+function extractAmount(value, needs) {
+  const text = String(value || '').replace(/[^0-9.,]/g, '');
+  const match = text.match(/\d{1,3}(?:\.\d{3})*,\d{2}/);
+  if (!match) {
+    needs.add('amount_brl');
+    needs.add('raw_amount');
+    return { amount: null, raw: null };
+  }
+  const raw = match[0];
+  const amount = parseAmount(raw);
+  if (amount == null) needs.add('amount_brl');
+  return { amount, raw };
+}
+
+function postProcessCieloRois(roisInput = {}) {
+  const needs = new Set();
+  const rois = {};
+  Object.entries(roisInput).forEach(([key, value]) => {
+    rois[key] = cleanRoiValue(value);
+  });
+
+  const result = {
+    issuer: 'CIELO',
+    brand: null,
+    mode: null,
+    card_last4: null,
+    masked_pan: null,
+    via: null,
+    pos_id: null,
+    merchant: { cnpj: null, name: null, address: null, city: null, state: null },
+    doc: null,
+    auth: null,
+    datetime_local: null,
+    channel: null,
+    operation: 'VENDA_A_CREDITO',
+    amount_brl: null,
+    raw_amount: null,
+    needs_user_input: [],
+  };
+
+  const roiA = toCleanUpper(rois.ROI_A);
+  let detectedBrand = null;
+  BRAND_SET.forEach((brand) => {
+    if (!detectedBrand && roiA.includes(brand)) detectedBrand = brand;
+  });
+  if (detectedBrand) result.brand = detectedBrand;
+  else needs.add('brand');
+
+  if (/DEBITO/.test(roiA)) {
+    result.mode = 'DEBITO';
+  } else if (/CREDITO\s*A\s*VISTA/.test(roiA)) {
+    result.mode = 'CREDITO_A_VISTA';
+  } else if (roiA) {
+    result.mode = formatEnum(roiA) || null;
+    if (!result.mode) needs.add('mode');
+  } else {
+    needs.add('mode');
+  }
+
+  const roiB = (rois.ROI_B || '').replace(/\s+/g, '');
+  const maskMatch = roiB.match(/\*{6,16}\d{4}/);
+  if (maskMatch) {
+    result.masked_pan = maskMatch[0];
+    const tail = result.masked_pan.slice(-4);
+    result.card_last4 = tail;
+  } else {
+    needs.add('masked_pan');
+    needs.add('card_last4');
+  }
+
+  const roiC = toCleanUpper(rois.ROI_C);
+  if (/CLIENTE/.test(roiC)) result.via = 'CLIENTE';
+  else needs.add('via');
+  const posMatch = roiC.match(/POS[\s-]?(\d{6,12})/);
+  if (posMatch) result.pos_id = posMatch[1];
+  else needs.add('pos_id');
+
+  const rawCnpj = (rois.ROI_D || '').replace(/\D/g, '');
+  if (rawCnpj.length === 14 && cnpjIsValid(rawCnpj)) {
+    result.merchant.cnpj = rawCnpj;
+  } else {
+    needs.add('merchant.cnpj');
+  }
+
+  const merchantName = sanitizeMerchantLine(rois.ROI_E);
+  if (merchantName) result.merchant.name = merchantName;
+  else needs.add('merchant.name');
+
+  parseAddressAndLocation(rois.ROI_F, result.merchant, needs);
+
+  const { doc, auth } = extractDocAuth(rois.ROI_G, needs);
+  result.doc = doc;
+  result.auth = auth;
+
+  const { datetimeLocal, channel } = extractDateTimeChannel(rois.ROI_H, needs);
+  result.datetime_local = datetimeLocal;
+  result.channel = channel;
+
+  const { amount, raw } = extractAmount(rois.ROI_I, needs);
+  result.amount_brl = amount;
+  result.raw_amount = raw;
+
+  if (!result.via) needs.add('via');
+  if (!result.operation) needs.add('operation');
+
+  result.needs_user_input = Array.from(needs);
+  return { rois, result };
 }
 
 function extractMerchant(lines, needs) {
@@ -285,4 +466,4 @@ function parseCieloReceipt(rawText) {
   return { normalizedText, result };
 }
 
-export { normalizeCieloText, parseCieloReceipt, cnpjIsValid };
+export { normalizeCieloText, parseCieloReceipt, postProcessCieloRois, cnpjIsValid };

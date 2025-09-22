@@ -56,3 +56,22 @@ const prepared = prepareDayInput(receipts, extract, context)
 ```
 
 This avoids asking the LLM to parse text → numbers, reducing token usage and improving determinism.
+
+Deterministic Daily Flags API (No LLM)
+--------------------------------------
+A strict daily-ledger checker is available without any LLM:
+
+- Library: `src/lib/dailyFlags.js`
+  - `computeDailyFlags({ receipts, extract, context })` returns the JSON verdict per the “daily flags” schema.
+  - `buildLLMInputs(receipts, extract, context)` normalizes pt-BR amounts so an LLM only compares/labels.
+- Pages Function: `POST /api/daily-flags`
+  - Body JSON: `{ receipts: [...], extract: {...}, context?: {...} }`
+  - Returns: the verdict JSON.
+
+Local test
+----------
+- `npm run test:daily` prints the GREEN example.
+
+Cloudflare setup
+----------------
+This endpoint is a Pages Function and does not require any bindings. Deploy via Cloudflare Pages as you do for the storage API.

@@ -1,6 +1,7 @@
 import './App.css'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Header from './components/Header.jsx'
+import DailyFlagsPanel from './components/DailyFlagsPanel.jsx'
 import AddReceiptDialog from './components/AddReceiptDialog.jsx'
 import ReceiptMonthView from './components/ReceiptMonthView.jsx'
 import { getMonthDisplayName, incMonth } from './lib/date.js'
@@ -152,6 +153,8 @@ export default function App() {
           <div className="card"><div className="label">Totais</div><div className="value">R$ {(totals.monthTotal || 0).toFixed(2)}</div></div>
         </div>
       </section>
+
+      <DailyFlagsPanel month={activeMonth} receipts={receipts} />
 
       <ReceiptMonthView month={activeMonth} groups={groups} totals={totals} onDelete={handleDelete} onEdit={(rec) => { setEditorMode('edit'); setEditingReceipt(rec); setDialogOpen(true) }} />
 

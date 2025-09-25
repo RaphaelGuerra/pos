@@ -1,58 +1,44 @@
-POS Match — Receipt Capture & Classification
-===========================================
+# POS Match
 
-Overview
---------
-- Mirrors the cash-ledger header structure (brand | month nav | actions).
-- Focuses on capturing, organizing, and exporting POS credit card receipt slips.
-- Targets Brazil defaults: R$, pt-BR date, labels.
+Small tool to capture, organize, and export POS credit‑card receipt slips.
 
-What’s Implemented
-------------------
-- Month navigation with the same header grid layout.
-- Add Receipt mini-form dialog with Value/Date, Not legible toggles, POS/DOC/NSU, Notes.
-- Organize receipts by month → day, plus a “Dia desconhecido” bucket.
-- Totals per day and per month (value-only receipts count toward totals).
-- Exports for the current month: CSV and JSON buttons in the header.
-- Local persistence by month via localStorage.
-- Sync ID (optional) with encrypted remote persistence via /api/storage. Requires a KV namespace binding named `POS` and provisioning `space:<SyncID>` key in Cloudflare Pages.
+This is a small side project for learning — receipt capture UX, ROI‑based OCR with Tesseract, local‑first month storage, and optional encrypted sync. It is not a production finance system.
 
-Getting Started
----------------
-- cd posmatch
-- npm install
-- npm run dev
+## What It Does
+- Month navigation with totals per day and per month
+- Add Receipt dialog: amount, date, POS/DOC/NSU, notes, “not legible” toggles
+- Buckets receipts by day, plus an Unknown Day group
+- Export current month as CSV or JSON
+- Local‑first persistence per month in the browser
+- Optional encrypted sync keyed by a Sync ID via `/api/storage`
 
-Design Notes
-------------
-- Header component follows the same class names and layout conventions used in cash-ledger’s Header.
-- Right column mirrors ledger’s Sync controls; month actions include Add Receipt + Export CSV/JSON.
-- OCR is not implemented yet; fields can be manually typed or marked as “Ilegível”.
-- Data model persists receipts per month at key `posmatch.v1.data.{YYYY-MM}`.
+## How It Works
+- Data lives in `localStorage` under `posmatch.v1.data.YYYY-MM`.
+- Optional remote sync uses a simple API: `GET/PUT /api/storage/:syncId/:YYYY-MM`.
+- Payloads are encrypted in the browser using the Sync ID as the passphrase (Web Crypto API).
+- Brazil defaults: currency (BRL), date formatting, and some labels.
 
-Next Steps (Optional)
----------------------
-- Wire OCR hints and confidence (e.g., on-device parsing helpers).
-- Import JSON back into the month.
-- Add remote sync if needed (reuse storage functions/crypto from cash-ledger).
-- Reconciliation workflows against online statements.
+## OCR (Optional)
+- Tesseract.js is installed and the Add Receipt dialog includes ROI presets for common slip layouts (e.g., Cielo).
+- The UI is usable without OCR — you can type fields or mark them as not legible.
 
-LLM Input Prep (Optional)
--------------------------
-If you plan to reconcile against an online statement using an LLM, use the thin wrapper in `src/lib/llmPrep.js` so the model only compares and classifies:
+## Run Locally
+Prerequisites: Node.js >= 20
 
-```js
-import { prepareDayInput } from './src/lib/llmPrep.js'
-
-const receipts = [
-  { id: 'r1', value: 400.00 },
-  { id: 'r2', value_raw: '120,00' }
-]
-const extract = { total_amount_brl: 520.00, transaction_count: 2 }
-const context = { date: '2012-03-11', currency: 'BRL' }
-
-const prepared = prepareDayInput(receipts, extract, context)
-// Send `prepared` to your model; it already has numeric amounts.
+```bash
+cd posmatch
+npm install
+npm run dev
 ```
 
-This avoids asking the LLM to parse text → numbers, reducing token usage and improving determinism.
+## Tech Stack
+- React + Vite
+- Tesseract.js (OCR)
+- Local storage + optional encrypted sync
+
+## Status & Learnings
+- Functional prototype to explore on‑device OCR and daily/monthly rollups
+- Next ideas: import JSON back, confidence overlays, reconciliation against statements
+
+## License
+All rights reserved. Personal portfolio project — not for production use.

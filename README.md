@@ -1,5 +1,19 @@
 # POS Match
 
+Last updated: 2025-10-22
+
+## Table of Contents
+
+<!-- TOC start -->
+- [What It Does](#what-it-does)
+- [How It Works](#how-it-works)
+- [OCR (Optional)](#ocr-optional)
+- [Run Locally](#run-locally)
+- [Tech Stack](#tech-stack)
+- [Status & Learnings](#status-learnings)
+- [License](#license)
+<!-- TOC end -->
+
 Small tool to capture, organize, and export POS credit‑card receipt slips.
 
 This is a small side project for learning — receipt capture UX, ROI‑based OCR with Tesseract, local‑first month storage, and optional encrypted sync. It is not a production finance system.

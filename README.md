@@ -20,6 +20,8 @@ Small tool to capture, organize, and export POS credit‑card receipt slips.
 
 This is a small side project for learning — receipt capture UX, ROI‑based OCR with Tesseract, local‑first month storage, and optional encrypted sync. It is not a production finance system.
 
+Live demo: none (local-only)
+
 ## What It Does
 - Month navigation with totals per day and per month
 - Add Receipt dialog: amount, date, POS/DOC/NSU, notes, “not legible” toggles

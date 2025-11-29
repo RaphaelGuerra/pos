@@ -10,7 +10,7 @@ Last updated: 2025-11-29
 - [OCR (Optional)](#ocr-optional)
 - [Run Locally](#run-locally)
 - [Tech Stack](#tech-stack)
-- [Status & Learnings](#status-learnings)
+- [Status & Learnings](#status--learnings)
 - [License](#license)
 <!-- TOC end -->
 

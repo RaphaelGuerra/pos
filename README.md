@@ -1,7 +1,6 @@
 # POS Match
 
-[![Lint](https://github.com/RaphaelGuerra/pos/actions/workflows/lint.yml/badge.svg)](https://github.com/RaphaelGuerra/pos/actions/workflows/lint.yml)
-[![Security](https://github.com/RaphaelGuerra/pos/actions/workflows/security.yml/badge.svg)](https://github.com/RaphaelGuerra/pos/actions/workflows/security.yml)
+Last updated: 2025-11-30
 
 ## Table of Contents
 
@@ -14,6 +13,10 @@
 - [Status & Learnings](#status--learnings)
 - [License](#license)
 <!-- TOC end -->
+
+[![Lint](https://github.com/RaphaelGuerra/pos/actions/workflows/lint.yml/badge.svg)](https://github.com/RaphaelGuerra/pos/actions/workflows/lint.yml)
+[![Security](https://github.com/RaphaelGuerra/pos/actions/workflows/security.yml/badge.svg)](https://github.com/RaphaelGuerra/pos/actions/workflows/security.yml)
+
 
 Small tool to capture, organize, and export POS credit‑card receipt slips.
 

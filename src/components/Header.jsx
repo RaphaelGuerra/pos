@@ -9,6 +9,7 @@ export default function Header({
   onPrevMonth,
   onNextMonth,
   onAdd,
+  onImport,
   onExportCSV,
   onExportJSON,
   syncId,
@@ -29,7 +30,15 @@ export default function Header({
           </div>
         </div>
 
-        <MonthNav monthLabel={monthLabel} onPrevMonth={onPrevMonth} onNextMonth={onNextMonth} onAdd={onAdd} onExportCSV={onExportCSV} onExportJSON={onExportJSON} />
+        <MonthNav
+          monthLabel={monthLabel}
+          onPrevMonth={onPrevMonth}
+          onNextMonth={onNextMonth}
+          onAdd={onAdd}
+          onImport={onImport}
+          onExportCSV={onExportCSV}
+          onExportJSON={onExportJSON}
+        />
 
         <SyncControls
           syncId={syncId}
@@ -44,7 +53,7 @@ export default function Header({
   )
 }
 
-export function MonthNav({ monthLabel, onPrevMonth, onNextMonth, onAdd, onExportCSV, onExportJSON }) {
+export function MonthNav({ monthLabel, onPrevMonth, onNextMonth, onAdd, onImport, onExportCSV, onExportJSON }) {
   return (
     <div className="header-month-controls">
       <div className="month-navigation">
@@ -54,6 +63,7 @@ export function MonthNav({ monthLabel, onPrevMonth, onNextMonth, onAdd, onExport
       </div>
       <div className="month-actions">
         <button className="primary" onClick={onAdd}>Adicionar Recibo</button>
+        <button className="secondary" onClick={onImport}>Importar</button>
         <button className="secondary" onClick={onExportCSV}>Exportar CSV</button>
         <button className="secondary" onClick={onExportJSON}>Exportar JSON</button>
       </div>

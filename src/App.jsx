@@ -7,6 +7,7 @@ import { getMonthDisplayName, incMonth } from './lib/date.js'
 import { loadLocal, saveLocalDebounced, getSyncId, setSyncId, loadRemote, saveRemoteDebounced } from './lib/store.js'
 import { groupByDay, totals as computeTotals, countPending } from './lib/selectors.js'
 import { downloadCSV, downloadJSON } from './lib/exports.js'
+import { parseImportFile, mergeReceipts } from './lib/imports.js'
 
 export default function App() {
   const now = new Date()
@@ -21,6 +22,7 @@ export default function App() {
   const [editingReceipt, setEditingReceipt] = useState(null)
   const [toast, setToast] = useState('')
   const lastSyncStatusRef = useRef('off')
+  const importInputRef = useRef(null)
 
   // Initialize Sync ID from local storage
   useEffect(() => {
@@ -109,6 +111,35 @@ export default function App() {
     downloadJSON(`posmatch-${activeMonth}.json`, monthReceipts)
   }
 
+  function triggerImport() {
+    if (importInputRef.current) importInputRef.current.click()
+  }
+
+  async function handleImportFile(event) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const { receipts: imported } = parseImportFile(file.name, text)
+      const { merged, added, skippedDuplicates, skippedOutOfMonth } = mergeReceipts(receipts, imported, activeMonth)
+
+      if (added > 0) {
+        setReceipts(merged)
+        persist(merged)
+      }
+
+      const parts = []
+      if (added) parts.push(`Importados: ${added}`)
+      if (skippedDuplicates) parts.push(`Duplicados: ${skippedDuplicates}`)
+      if (skippedOutOfMonth) parts.push(`Outro mes: ${skippedOutOfMonth}`)
+      showToast(parts.length ? parts.join(' • ') : 'Nada para importar')
+    } catch (e) {
+      showToast('Falha ao importar arquivo')
+    } finally {
+      event.target.value = ''
+    }
+  }
+
   function handleSyncIdChange(id) { setSyncIdDraft(id) }
   function connectSync() {
     const id = (syncIdDraft || '').trim()
@@ -135,6 +166,7 @@ export default function App() {
         onPrevMonth={() => setActiveMonth(prev => incMonth(prev, -1))}
         onNextMonth={() => setActiveMonth(prev => incMonth(prev, 1))}
         onAdd={() => { setEditorMode('create'); setEditingReceipt(null); setDialogOpen(true) }}
+        onImport={triggerImport}
         onExportCSV={exportCSV}
         onExportJSON={exportJSON}
         syncId={syncId}
@@ -154,6 +186,14 @@ export default function App() {
       </section>
 
       <ReceiptMonthView month={activeMonth} groups={groups} totals={totals} onDelete={handleDelete} onEdit={(rec) => { setEditorMode('edit'); setEditingReceipt(rec); setDialogOpen(true) }} />
+
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".json,.csv,application/json,text/csv"
+        style={{ display: 'none' }}
+        onChange={handleImportFile}
+      />
 
       <AddReceiptDialog open={dialogOpen} month={activeMonth} mode={editorMode} receipt={editingReceipt} onClose={() => { setDialogOpen(false); setEditingReceipt(null); setEditorMode('create') }} onSave={handleAdd} onUpdate={handleUpdate} />
 

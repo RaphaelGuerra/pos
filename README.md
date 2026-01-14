@@ -28,7 +28,7 @@ Live demo: none (local-only)
 - Month navigation with totals per day and per month
 - Add Receipt dialog: amount, date, POS/DOC/NSU, notes, “not legible” toggles
 - Buckets receipts by day, plus an Unknown Day group
-- Export current month as CSV or JSON
+- Export/import current month as CSV or JSON
 - Local‑first persistence per month in the browser
 - Optional encrypted sync keyed by a Sync ID via `/api/storage`
 

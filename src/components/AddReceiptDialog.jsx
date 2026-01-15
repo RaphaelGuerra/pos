@@ -1,7 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import Tesseract from 'tesseract.js'
 import { parseCieloReceipt, postProcessCieloRois } from '../lib/cieloParser'
 import { parsePtbrAmount as parseCurrencyBRL } from '../lib/money.js'
+
+const OCR_TIMEOUT_MS = 60000
+let tesseractPromise = null
+
+function loadTesseract() {
+  if (!tesseractPromise) {
+    tesseractPromise = import('tesseract.js').then((mod) => mod.default ?? mod)
+  }
+  return tesseractPromise
+}
 
 const ROI_CONFIG = [
   {
@@ -390,10 +399,11 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
   const [doc, setDoc] = useState('')
   const [nsu, setNsu] = useState('')
   const [notes, setNotes] = useState('')
-  const [ocrStatus, setOcrStatus] = useState('idle') // idle | running | done | error
+  const [ocrStatus, setOcrStatus] = useState('idle') // idle | running | done | error | cancelled
   const [ocrHint, setOcrHint] = useState('')
   const [ocrDebug, setOcrDebug] = useState(null)
   const ocrCancelRef = useRef(null)
+  const ocrRunIdRef = useRef(0)
 
   useEffect(() => {
     if (!open) return undefined
@@ -494,12 +504,26 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
 
   async function runOCR(imgBlob) {
     if (!imgBlob) return
+    const runId = ++ocrRunIdRef.current
+    const isCurrent = () => ocrRunIdRef.current === runId
     setOcrStatus('running')
     setOcrHint('Lendo texto…')
     setOcrDebug(null)
+    let timeoutId = null
+    const cancel = (reason = 'OCR cancelado') => {
+      if (!isCurrent()) return
+      ocrRunIdRef.current += 1
+      setOcrStatus('cancelled')
+      setOcrHint(reason)
+      setOcrDebug(null)
+      ocrCancelRef.current = null
+      if (timeoutId) window.clearTimeout(timeoutId)
+    }
     try {
-      const controller = new AbortController()
-      ocrCancelRef.current = () => controller.abort()
+      ocrCancelRef.current = () => cancel('OCR cancelado')
+      timeoutId = window.setTimeout(() => {
+        cancel('Tempo limite do OCR')
+      }, OCR_TIMEOUT_MS)
       let processed = null
       let usedPreprocessing = false
       try {
@@ -509,11 +533,15 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
         usedPreprocessing = false
       }
 
+      const Tesseract = await loadTesseract()
+      if (!isCurrent()) return
+
       const ocrTarget = processed?.binaryCanvas || imgBlob
       const anchorOcr = await Tesseract.recognize(ocrTarget, 'por', {
         logger: () => {},
         tessedit_pageseg_mode: 6,
       })
+      if (!isCurrent()) return
       const rawText = (anchorOcr?.data?.text || '').replace(/\u00A0/g, ' ')
       const fallback = parseCieloReceipt(rawText)
 
@@ -521,9 +549,11 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
       if (processed?.baseCanvas) {
         const roiTexts = {}
         for (const spec of ROI_CONFIG) {
+          if (!isCurrent()) return
           const variants = prepareRoiVariants(processed.baseCanvas, spec.rect)
           const variantTexts = []
           for (const variant of variants) {
+            if (!isCurrent()) return
             const options = {
               logger: () => {},
               tessedit_pageseg_mode: spec.psm,
@@ -610,6 +640,7 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
       if (!doc && parsed.doc) setDoc(parsed.doc)
       if (!nsu && parsed.auth) setNsu(parsed.auth)
 
+      if (!isCurrent()) return
       setOcrHint(hints.join(' • '))
       setOcrStatus('done')
       setOcrDebug({
@@ -621,11 +652,13 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
         usedPreprocessing,
       })
     } catch (e) {
+      if (!isCurrent()) return
       setOcrStatus('error')
       setOcrHint('Falha ao ler OCR')
       setOcrDebug({ error: true, message: e?.message || String(e) })
     } finally {
-      ocrCancelRef.current = null
+      if (timeoutId) window.clearTimeout(timeoutId)
+      if (isCurrent()) ocrCancelRef.current = null
     }
   }
 
@@ -695,6 +728,11 @@ export default function AddReceiptDialog({ open, month, mode = 'create', receipt
               <input type="file" accept="image/*" onChange={e => { const f = e.target.files?.[0] || null; setFile(f); if (f) runOCR(f) }} />
               {previewUrl ? <img src={previewUrl} alt="Prévia" style={{ maxHeight: 80, borderRadius: 6, border: '1px solid var(--border)' }} /> : null}
               {file ? <button className="secondary" type="button" onClick={() => runOCR(file)} disabled={ocrStatus==='running'}>{ocrStatus==='running' ? 'Lendo…' : 'Reprocessar OCR'}</button> : null}
+              {ocrStatus === 'running' ? (
+                <button className="secondary" type="button" onClick={() => ocrCancelRef.current?.()}>
+                  Cancelar OCR
+                </button>
+              ) : null}
             </div>
             <div className="hint">Você pode tirar foto ou escolher da galeria</div>
             {ocrDebug ? (

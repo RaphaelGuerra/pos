@@ -1,6 +1,6 @@
 # POS Match
 
-Last updated: 2026-02-21
+Last updated: 2026-02-24
 
 ## Table of Contents
 
@@ -9,6 +9,7 @@ Last updated: 2026-02-21
 - [How It Works](#how-it-works)
 - [OCR (Optional)](#ocr-optional)
 - [Run Locally](#run-locally)
+- [Validation Script](#validation-script)
 - [Tech Stack](#tech-stack)
 - [Status & Learnings](#status--learnings)
 - [License](#license)
@@ -46,10 +47,15 @@ Live demo: none (local-only)
 Prerequisites: Node.js >= 20
 
 ```bash
-cd posmatch
+cd apps/posmatch
 npm install
 npm run dev
 ```
+
+## Validation Script
+- Command: `npm run test:llm`
+- Script: `scripts/test-llm-prep.mjs`
+- Purpose: sanity-checks receipt normalization and LLM preparation payloads with reproducible sample cases.
 
 ## Tech Stack
 - React + Vite
